@@ -35,6 +35,17 @@
   </div>
 </div>
 
+<!-- Category chips + toggles -->
+<div class="filter-bar" id="filterBar">
+  <div class="chips" id="chips"></div>
+  <div class="toggles">
+    <label class="toggle-label">
+      <input type="checkbox" id="showNoDesc" onchange="doFilter()">
+      <span>Show lints with no description</span>
+    </label>
+  </div>
+</div>
+
 <!-- Status -->
 <div id="statusBar" class="status-bar">Loading...</div>
 
@@ -60,6 +71,8 @@ var ALL_SITES = [];
 var FILTERED  = [];
 var RENDERED  = 0;
 var BATCH     = 40;
+var ALL_CATEGORIES = [];  // sorted unique hashtags
+var activeCategory = 'all';
 
 // Cache: name -> preview srcdoc HTML (so we don't re-extract on filter)
 var PREVIEW_CACHE = {};
@@ -122,6 +135,24 @@ function escRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Extract #hashtags from a description string
+function extractHashtags(desc) {
+  if (!desc) return [];
+  var matches = desc.match(/#[a-zA-Z0-9_]+/g);
+  if (!matches) return [];
+  // Normalise to lowercase, deduplicate
+  var seen = {};
+  var result = [];
+  for (var i = 0; i < matches.length; i++) {
+    var tag = matches[i].toLowerCase();
+    if (!seen[tag]) {
+      seen[tag] = true;
+      result.push(tag);
+    }
+  }
+  return result;
+}
+
 /* ══════════════════════════════════════
    SCAN BLOCKCHAIN FOR ALL PUBLISHED LINTS
    ══════════════════════════════════════ */
@@ -159,6 +190,9 @@ function scanChain() {
       var version = st[4] ? (parseInt(st[4]) || 1) : 1;
       var file    = st[5] || '';
 
+      // Extract hashtags from description
+      var tags = extractHashtags(desc);
+
       // Keep only the newest version per name
       if (!sites[name] || sites[name].data.version < version) {
         sites[name] = {
@@ -166,7 +200,8 @@ function scanChain() {
             name:        name,
             description: desc,
             version:     version,
-            file:        file
+            file:        file,
+            tags:        tags
           }
         };
       }
@@ -177,45 +212,157 @@ function scanChain() {
       return a.data.name.toLowerCase().localeCompare(b.data.name.toLowerCase());
     });
 
-    MDS.log("LINTLIST: " + ALL_SITES.length + " unique lints after dedup");
+    // Build category list from all hashtags
+    var catSet = {};
+    for (var c = 0; c < ALL_SITES.length; c++) {
+      var t = ALL_SITES[c].data.tags || [];
+      for (var j = 0; j < t.length; j++) catSet[t[j]] = true;
+    }
+    ALL_CATEGORIES = Object.keys(catSet).sort();
 
+    MDS.log("LINTLIST: " + ALL_SITES.length + " unique lints, " + ALL_CATEGORIES.length + " categories");
+
+    renderCategoryChips();
     FILTERED = ALL_SITES.slice();
+    activeCategory = 'all';
     updateStatus();
 
     if (ALL_SITES.length === 0) {
       showEmpty();
     } else {
-      renderBatch();
+      doFilter();
     }
   });
 }
 
 /* ══════════════════════════════════════
-   FILTER
+   CATEGORY CHIPS
+   ══════════════════════════════════════ */
+function renderCategoryChips() {
+  var h = '<button class="chip active" onclick="setCategory(\'all\',this)">All</button>';
+  for (var i = 0; i < ALL_CATEGORIES.length; i++) {
+    var tag = ALL_CATEGORIES[i];
+    h += '<button class="chip" onclick="setCategory(\'' + tag.replace(/'/g, "\\'") + '\',this)">' + esc(tag) + '</button>';
+  }
+  h += '<button class="chip" onclick="setCategory(\'uncategorised\',this)">uncategorised</button>';
+  document.getElementById('chips').innerHTML = h;
+}
+
+function setCategory(cat, btn) {
+  activeCategory = cat;
+  var chips = document.querySelectorAll('.chip');
+  for (var i = 0; i < chips.length; i++) chips[i].classList.remove('active');
+  if (btn) btn.classList.add('active');
+  doFilter();
+}
+
+/* ══════════════════════════════════════
+   FILTER — search + category + description toggle
    ══════════════════════════════════════ */
 function doFilter() {
   var q = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+  var showNoDesc = document.getElementById('showNoDesc').checked;
 
-  if (!q) {
-    FILTERED = ALL_SITES.slice();
-  } else {
-    FILTERED = ALL_SITES.filter(function(site) {
-      var name = (site.data.name || '').toLowerCase();
-      var desc = (site.data.description || '').toLowerCase();
-      return name.indexOf(q) !== -1 || desc.indexOf(q) !== -1;
+  var items = ALL_SITES;
+
+  // Filter by category
+  if (activeCategory === 'uncategorised') {
+    items = items.filter(function(site) {
+      return !site.data.tags || site.data.tags.length === 0;
+    });
+  } else if (activeCategory !== 'all') {
+    items = items.filter(function(site) {
+      return site.data.tags && site.data.tags.indexOf(activeCategory) !== -1;
     });
   }
 
+  // Filter out lints with no description (unless toggle is on)
+  if (!showNoDesc) {
+    items = items.filter(function(site) {
+      var d = (site.data.description || '').trim();
+      return d.length > 0;
+    });
+  }
+
+  // Search filter
+  if (q) {
+    items = items.filter(function(site) {
+      var name = (site.data.name || '').toLowerCase();
+      var desc = (site.data.description || '').toLowerCase();
+      var tags = (site.data.tags || []).join(' ');
+      return name.indexOf(q) !== -1 || desc.indexOf(q) !== -1 || tags.indexOf(q) !== -1;
+    });
+  }
+
+  FILTERED = items;
   updateStatus();
   RENDERED = 0;
   document.getElementById('content').innerHTML = '';
 
   if (FILTERED.length === 0 && ALL_SITES.length > 0) {
     document.getElementById('content').innerHTML =
-      '<div class="empty"><h3>No matches</h3><p>Try a different search.</p></div>';
+      '<div class="empty"><h3>No matches</h3><p>Try a different search or category.</p></div>';
   } else if (FILTERED.length > 0) {
-    renderBatch();
+    renderByCategory();
   }
+}
+
+/* ══════════════════════════════════════
+   RENDER BY CATEGORY — group tiles under headers
+   ══════════════════════════════════════ */
+function renderByCategory() {
+  var container = document.getElementById('content');
+  container.innerHTML = '';
+
+  // Group filtered items by category
+  var groups = {};
+  var order = [];
+
+  for (var i = 0; i < FILTERED.length; i++) {
+    var site = FILTERED[i];
+    var tags = site.data.tags || [];
+    var cats = tags.length > 0 ? tags : ['uncategorised'];
+
+    for (var j = 0; j < cats.length; j++) {
+      var cat = cats[j];
+      if (!groups[cat]) {
+        groups[cat] = [];
+        order.push(cat);
+      }
+      groups[cat].push(site);
+    }
+  }
+
+  // Sort: alphabetical, with 'uncategorised' last
+  order.sort(function(a, b) {
+    if (a === 'uncategorised') return 1;
+    if (b === 'uncategorised') return -1;
+    return a.localeCompare(b);
+  });
+
+  // Render each group
+  var globalIndex = 0;
+  for (var g = 0; g < order.length; g++) {
+    var cat = order[g];
+    var sites = groups[cat];
+
+    // Category header
+    var header = document.createElement('div');
+    header.className = 'cat-header';
+    header.innerHTML = '<span class="cat-tag">' + esc(cat) + '</span><span class="cat-count">' + sites.length + '</span>';
+    container.appendChild(header);
+
+    // Grid of tiles
+    var grid = document.createElement('div');
+    grid.className = 'grid';
+    for (var s = 0; s < sites.length; s++) {
+      grid.appendChild(createTile(sites[s], globalIndex));
+      globalIndex++;
+    }
+    container.appendChild(grid);
+  }
+
+  RENDERED = FILTERED.length;
 }
 
 function updateStatus() {
