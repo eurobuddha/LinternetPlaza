@@ -1,0 +1,256 @@
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinternetList — All the sites on the PocketWeb</title>
+  <script type="text/javascript" src="../../miniweb/mds.js"></script>
+  <script type="text/javascript" src="../../miniweb/miniweb.js"></script>
+  <link rel="stylesheet" href="../../miniweb/fonts/fonts.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Nav -->
+<div class="nav">
+  <div class="nav-brand">
+    <span class="icon">📑</span>
+    <span>LinternetList</span>
+    <span class="sub">all the sites on the PocketWeb catalogue</span>
+  </div>
+  <div class="nav-right">
+    <div class="block-pill">
+      <span class="dot"></span>
+      Block <strong id="blockNum">—</strong>
+    </div>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="search-bar">
+  <div class="search-wrap">
+    <span class="ico">🔍</span>
+    <input type="text" id="searchInput" placeholder="Search the linternet..." oninput="doFilter()">
+  </div>
+</div>
+
+<!-- Status -->
+<div id="statusBar" class="status-bar">Loading sites...</div>
+
+<!-- Content -->
+<div class="content" id="content"></div>
+
+<!-- Footer -->
+<div class="footer" id="footer">
+  <a href="#" onclick="jumpTo('pocketweb-site/index.html');return false;">PocketWeb</a>
+  <a href="#" onclick="jumpTo('pocketshop-site/index.html');return false;">PocketShop</a>
+  <a href="#" onclick="jumpTo('minima-intro/index.html');return false;">Intro</a>
+  <a href="#" onclick="jumpTo('minima-learn/index.html');return false;">Learn</a>
+  <a href="#" onclick="jumpTo('minima-node/index.html');return false;">Node</a>
+  <a href="#" onclick="jumpTo('minima-dev-start/index.html');return false;">Dev</a>
+  <a href="https://docs.minima.global" target="_blank">Official</a>
+  <br><br>LinternetList &copy; 2025 &middot; On PocketWeb
+</div>
+
+<!-- Scroll-top -->
+<button class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+
+<script>
+
+var ALL_SITES = [];
+var FILTERED  = [];
+var RENDERED  = 0;
+var BATCH     = 40;
+
+// Accent colors for tiles
+var COLORS = [
+  '#f0c040','#34d399','#5b8def','#fb923c','#a78bfa',
+  '#f472b6','#22d3ee','#f87171','#fbbf24','#818cf8',
+  '#4ade80','#c084fc','#67e8f9','#fda4af','#bef264'
+];
+
+// ── Load all sites from pocketFS via miniweb ──
+function loadAllSites() {
+  document.getElementById('statusBar').textContent = 'Discovering sites on the linternet...';
+
+  miniweb_ListAll(function(resp) {
+    var data;
+    try { data = JSON.parse(resp); } catch(e) { data = resp; }
+
+    ALL_SITES = (data.results || data || []);
+    FILTERED  = ALL_SITES.slice();
+
+    updateStatus();
+
+    if (ALL_SITES.length === 0) {
+      showEmpty();
+    } else {
+      RENDERED = 0;
+      document.getElementById('content').innerHTML = '';
+      renderBatch();
+    }
+  });
+}
+
+// ── Filter by search term ──
+function doFilter() {
+  var q = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+
+  if (!q) {
+    FILTERED = ALL_SITES.slice();
+  } else {
+    FILTERED = ALL_SITES.filter(function(site) {
+      var name = (site.data.name || '').toLowerCase();
+      var desc = (site.data.description || '').toLowerCase();
+      return name.indexOf(q) !== -1 || desc.indexOf(q) !== -1;
+    });
+  }
+
+  updateStatus();
+  RENDERED = 0;
+  document.getElementById('content').innerHTML = '';
+
+  if (FILTERED.length === 0) {
+    showEmpty();
+  } else {
+    renderBatch();
+  }
+}
+
+function updateStatus() {
+  var bar = document.getElementById('statusBar');
+  var q = (document.getElementById('searchInput').value || '').trim();
+  if (q) {
+    bar.innerHTML = '<b>' + FILTERED.length + '</b> of ' + ALL_SITES.length + ' minisites';
+  } else {
+    bar.innerHTML = '<b>' + ALL_SITES.length + '</b> minisites discovered';
+  }
+}
+
+// ── Render a batch of tiles ──
+function renderBatch() {
+  var grid = document.getElementById('content');
+  var end  = Math.min(RENDERED + BATCH, FILTERED.length);
+
+  // Create or find grid container
+  var g = grid.querySelector('.grid');
+  if (!g) {
+    g = document.createElement('div');
+    g.className = 'grid';
+    grid.appendChild(g);
+  }
+
+  for (var i = RENDERED; i < end; i++) {
+    g.appendChild(createTile(FILTERED[i], i));
+  }
+  RENDERED = end;
+}
+
+// ── Create a single bookmark tile ──
+function createTile(site, index) {
+  var name    = site.data.name || 'Unknown';
+  var desc    = site.data.description || 'No description';
+  var version = site.data.version || 1;
+  var color   = COLORS[index % COLORS.length];
+
+  // First letter for the icon
+  var letter = name.replace('Mx','').charAt(0).toUpperCase();
+  if (letter === '2') letter = name.replace('Mx200','').charAt(0).toUpperCase();
+  if (!letter || letter === '0') letter = 'M';
+
+  // Truncate long Mx addresses
+  var shortName = name;
+  if (shortName.length > 28) {
+    shortName = shortName.substring(0, 14) + '...' + shortName.substring(shortName.length - 8);
+  }
+
+  var tile = document.createElement('div');
+  tile.className = 'bm';
+  tile.style.setProperty('--tile-color', color);
+  tile.style.animationDelay = ((index - (RENDERED || 0)) * 0.03) + 's';
+
+  tile.innerHTML =
+    '<div class="bm-bar" style="background:' + color + '"></div>' +
+    '<div class="bm-icon" style="background:' + color + '">' + letter + '</div>' +
+    '<div class="bm-body">' +
+    '  <div class="bm-tag" style="color:' + color + '">v' + version + '</div>' +
+    '  <h3 title="' + esc(name) + '">' + esc(shortName) + '</h3>' +
+    '  <p>' + esc(desc) + '</p>' +
+    '  <div class="bm-path">' + esc(name) + '</div>' +
+    '</div>';
+
+  tile.addEventListener('click', function() {
+    miniweb_JumpToURL(name);
+  });
+
+  return tile;
+}
+
+function esc(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ── Empty state ──
+function showEmpty() {
+  document.getElementById('content').innerHTML =
+    '<div class="empty">' +
+    '<h3>No minisites found</h3>' +
+    '<p>Publish a minisite with PocketFS or wait for the network to sync.</p>' +
+    '</div>';
+}
+
+// ── Jump to a page on PocketWeb ──
+function jumpTo(addr) {
+  miniweb_JumpToURL(addr);
+}
+
+// ── Scroll-top ──
+window.addEventListener('scroll', function() {
+  document.getElementById('scrollTop').classList.toggle('show', window.scrollY > 300);
+});
+
+// ── Infinite scroll ──
+window.addEventListener('scroll', function() {
+  if (RENDERED < FILTERED.length) {
+    var scrollBottom = window.innerHeight + window.scrollY;
+    var docHeight = document.documentElement.scrollHeight;
+    if (scrollBottom >= docHeight - 300) {
+      renderBatch();
+    }
+  }
+});
+
+// ── Keyboard: / to search, Esc to clear ──
+document.addEventListener('keydown', function(e) {
+  if (e.key === '/' && document.activeElement.tagName !== 'INPUT') {
+    e.preventDefault();
+    document.getElementById('searchInput').focus();
+  }
+  if (e.key === 'Escape') {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('searchInput').blur();
+    doFilter();
+  }
+});
+
+// ── MDS init ──
+miniweb_Init();
+MDS.init(function(msg) {
+  if (msg.event === 'inited') {
+    loadAllSites();
+    MDS.cmd('block', function(res) {
+      if (res.response) document.getElementById('blockNum').textContent = res.response.block;
+    });
+  }
+  if (msg.event === 'NEWBLOCK') {
+    MDS.cmd('block', function(res) {
+      if (res.response) document.getElementById('blockNum').textContent = res.response.block;
+    });
+  }
+});
+
+</script>
+
+</body>
+</html>
