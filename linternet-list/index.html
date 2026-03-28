@@ -161,15 +161,75 @@ function extractHashtags(desc) {
 }
 
 /* ══════════════════════════════════════
-   SCAN BLOCKCHAIN FOR ALL PUBLISHED LINTS
+   LOAD ALL LINTS
+   Strategy: ask pocketFS first (has full DB
+   including Maxima-received sites), fall back
+   to direct coin scan if pocketFS unavailable
    ══════════════════════════════════════ */
 function scanChain() {
-  document.getElementById('statusBar').textContent = 'Scanning the blockchain for lints...';
+  document.getElementById('statusBar').textContent = 'Discovering lints...';
   document.getElementById('content').innerHTML = '';
   RENDERED = 0;
 
-  MDS.cmd("coins simplestate:true address:" + MINIWEB_FILE_ADDRESS, function(resp) {
+  // Try pocketFS API first — it has the most complete list
+  var api = {};
+  api.action = "LISTALL";
 
+  MDS.api.call("pocketfs", JSON.stringify(api), function(resp) {
+    if (resp.status) {
+      var data = resp.data;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch(e) { data = {}; }
+      }
+      var results = [];
+      if (data && Array.isArray(data.results)) results = data.results;
+
+      if (results.length > 0) {
+        MDS.log("LINTLIST: pocketFS returned " + results.length + " lints");
+        processSiteList(results);
+        return;
+      }
+    }
+
+    // Fallback: direct coin scan
+    MDS.log("LINTLIST: pocketFS unavailable, falling back to coin scan");
+    scanCoins();
+  });
+}
+
+// Process results from pocketFS (already structured as filepackets)
+function processSiteList(results) {
+  var sites = {};
+  for (var i = 0; i < results.length; i++) {
+    var fp = results[i];
+    if (!fp.data || !fp.data.name) continue;
+
+    var name = fp.data.name;
+    var desc = fp.data.description || '';
+    var version = fp.data.version || 1;
+    var file = fp.data.file || '';
+    var tags = extractHashtags(desc);
+
+    if (!sites[name] || sites[name].data.version < version) {
+      sites[name] = {
+        data: {
+          name: name,
+          description: desc,
+          version: version,
+          file: file,
+          tags: tags
+        }
+      };
+    }
+  }
+  finaliseSites(sites);
+}
+
+// Fallback: scan blockchain coins directly
+function scanCoins() {
+  document.getElementById('statusBar').textContent = 'Scanning blockchain...';
+
+  MDS.cmd("coins simplestate:true address:" + MINIWEB_FILE_ADDRESS, function(resp) {
     if (!resp.response || resp.response.length === 0) {
       ALL_SITES = [];
       FILTERED = [];
@@ -181,65 +241,63 @@ function scanChain() {
     var coins = resp.response;
     var sites = {};
 
-    MDS.log("LINTLIST: found " + coins.length + " coins at file address");
+    MDS.log("LINTLIST: coin scan found " + coins.length + " coins");
 
     for (var i = 0; i < coins.length; i++) {
       var coin = coins[i];
       var st = coin.state;
-
-      // Only require name (state[0]) to be present
       if (!st || !st[0]) continue;
 
-      var name    = stripBrackets(st[0]);
+      var name = stripBrackets(st[0]);
       if (!name) continue;
 
       var desc    = st[3] ? decodeDesc(stripBrackets(st[3])) : '';
       var version = st[4] ? (parseInt(st[4]) || 1) : 1;
       var file    = st[5] || '';
+      var tags    = extractHashtags(desc);
 
-      // Extract hashtags from description
-      var tags = extractHashtags(desc);
-
-      // Keep only the newest version per name
       if (!sites[name] || sites[name].data.version < version) {
         sites[name] = {
           data: {
-            name:        name,
+            name: name,
             description: desc,
-            version:     version,
-            file:        file,
-            tags:        tags
+            version: version,
+            file: file,
+            tags: tags
           }
         };
       }
     }
-
-    ALL_SITES = Object.values(sites);
-    ALL_SITES.sort(function(a, b) {
-      return a.data.name.toLowerCase().localeCompare(b.data.name.toLowerCase());
-    });
-
-    // Build category list from all hashtags
-    var catSet = {};
-    for (var c = 0; c < ALL_SITES.length; c++) {
-      var t = ALL_SITES[c].data.tags || [];
-      for (var j = 0; j < t.length; j++) catSet[t[j]] = true;
-    }
-    ALL_CATEGORIES = Object.keys(catSet).sort();
-
-    MDS.log("LINTLIST: " + ALL_SITES.length + " unique lints, " + ALL_CATEGORIES.length + " categories");
-
-    renderCategoryChips();
-    FILTERED = ALL_SITES.slice();
-    activeCategory = 'all';
-    updateStatus();
-
-    if (ALL_SITES.length === 0) {
-      showEmpty();
-    } else {
-      doFilter();
-    }
+    finaliseSites(sites);
   });
+}
+
+// Common: sort, build categories, render
+function finaliseSites(sites) {
+  ALL_SITES = Object.values(sites);
+  ALL_SITES.sort(function(a, b) {
+    return a.data.name.toLowerCase().localeCompare(b.data.name.toLowerCase());
+  });
+
+  var catSet = {};
+  for (var c = 0; c < ALL_SITES.length; c++) {
+    var t = ALL_SITES[c].data.tags || [];
+    for (var j = 0; j < t.length; j++) catSet[t[j]] = true;
+  }
+  ALL_CATEGORIES = Object.keys(catSet).sort();
+
+  MDS.log("LINTLIST: " + ALL_SITES.length + " lints, " + ALL_CATEGORIES.length + " categories");
+
+  renderCategoryChips();
+  FILTERED = ALL_SITES.slice();
+  activeCategory = 'all';
+  updateStatus();
+
+  if (ALL_SITES.length === 0) {
+    showEmpty();
+  } else {
+    doFilter();
+  }
 }
 
 /* ══════════════════════════════════════
