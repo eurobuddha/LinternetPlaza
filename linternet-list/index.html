@@ -35,27 +35,34 @@
   </div>
 </div>
 
-<!-- Category chips + toggles -->
-<div class="filter-bar" id="filterBar">
-  <div class="chips" id="chips"></div>
-  <div class="toggles">
-    <label class="toggle-label">
-      <input type="checkbox" id="showNoDesc" onchange="doFilter()">
-      <span>Show lints with no description</span>
-    </label>
-  </div>
-</div>
-
 <!-- Status -->
 <div id="statusBar" class="status-bar">Loading...</div>
 
-<!-- Tile grid -->
-<div class="content" id="content"></div>
-
-<!-- Footer -->
-<div class="footer">
-  LinternetList &copy; 2025 &middot; <span id="siteTotal">0</span> lints discovered
+<!-- Layout: sidebar + main -->
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-section">
+      <div class="side-label">Categories</div>
+      <div id="sideCategories"></div>
+    </div>
+    <div class="side-section">
+      <div class="side-label">Options</div>
+      <label class="toggle-label">
+        <input type="checkbox" id="showNoDesc" onchange="doFilter()">
+        <span>Show no-description lints</span>
+      </label>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="content" id="content"></div>
+    <div class="footer">
+      LinternetPlaza &copy; 2025 &middot; <span id="siteTotal">0</span> lints discovered
+    </div>
+  </main>
 </div>
+
+<!-- Mobile sidebar toggle -->
+<button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
 
 <!-- Scroll-top -->
 <button class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
@@ -239,21 +246,49 @@ function scanChain() {
    CATEGORY CHIPS
    ══════════════════════════════════════ */
 function renderCategoryChips() {
-  var h = '<button class="chip active" onclick="setCategory(\'all\',this)">All</button>';
+  // Count lints per category
+  var counts = { all: ALL_SITES.length, uncategorised: 0 };
+  for (var i = 0; i < ALL_SITES.length; i++) {
+    var tags = ALL_SITES[i].data.tags || [];
+    if (tags.length === 0) counts.uncategorised++;
+    for (var j = 0; j < tags.length; j++) {
+      counts[tags[j]] = (counts[tags[j]] || 0) + 1;
+    }
+  }
+
+  var h = '<button class="side-btn active" onclick="setCategory(\'all\',this)">' +
+    '<span class="side-dot" style="background:var(--accent)"></span>All' +
+    '<span class="side-cnt">' + counts.all + '</span></button>';
+
   for (var i = 0; i < ALL_CATEGORIES.length; i++) {
     var tag = ALL_CATEGORIES[i];
-    h += '<button class="chip" onclick="setCategory(\'' + tag.replace(/'/g, "\\'") + '\',this)">' + esc(tag) + '</button>';
+    var c = COLORS[i % COLORS.length];
+    h += '<button class="side-btn" onclick="setCategory(\'' + tag.replace(/'/g, "\\'") + '\',this)">' +
+      '<span class="side-dot" style="background:' + c + '"></span>' + esc(tag) +
+      '<span class="side-cnt">' + (counts[tag] || 0) + '</span></button>';
   }
-  h += '<button class="chip" onclick="setCategory(\'uncategorised\',this)">uncategorised</button>';
-  document.getElementById('chips').innerHTML = h;
+
+  if (counts.uncategorised > 0) {
+    h += '<button class="side-btn" onclick="setCategory(\'uncategorised\',this)">' +
+      '<span class="side-dot" style="background:var(--dim)"></span>uncategorised' +
+      '<span class="side-cnt">' + counts.uncategorised + '</span></button>';
+  }
+
+  document.getElementById('sideCategories').innerHTML = h;
 }
 
 function setCategory(cat, btn) {
   activeCategory = cat;
-  var chips = document.querySelectorAll('.chip');
-  for (var i = 0; i < chips.length; i++) chips[i].classList.remove('active');
+  var btns = document.querySelectorAll('.side-btn');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
   if (btn) btn.classList.add('active');
   doFilter();
+  // Close sidebar on mobile
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
 }
 
 /* ══════════════════════════════════════
