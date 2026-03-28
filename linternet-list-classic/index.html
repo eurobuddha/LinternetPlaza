@@ -2,7 +2,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>LinternetPlaza</title>
+  <title>LinternetList</title>
   <script type="text/javascript" src="mds.js"></script>
   <script type="text/javascript" src="jszip.min.js"></script>
   <script type="text/javascript" src="purify.min.js"></script>
@@ -11,63 +11,61 @@
 </head>
 <body>
 
-<!-- Atmospheric layers -->
-<div class="grid-bg"></div>
-<div class="glow-orb glow-orb-1"></div>
-<div class="glow-orb glow-orb-2"></div>
-
-<!-- Header -->
-<header class="header">
-  <h1 class="header-title">LINTERNET PLAZA</h1>
-  <p class="header-sub">all the lints on the <span class="accent">pocketWeb</span></p>
-  <div class="header-stats" id="headerStats">
-    <span class="dot"></span>
-    <span id="statsText">scanning...</span>
-    <span>&middot;</span>
-    <span>Block <strong id="blockNum">&mdash;</strong></span>
+<!-- Nav -->
+<div class="nav">
+  <div class="nav-brand">
+    <span class="icon">📑</span>
+    <span>Lint</span>
+    <span class="sub">all the lints on the pocketWeb</span>
   </div>
-</header>
+  <div class="nav-right">
+    <button class="nav-btn" onclick="scanChain()" title="Rescan">↻</button>
+    <div class="block-pill">
+      <span class="dot"></span>
+      Block <strong id="blockNum">—</strong>
+    </div>
+  </div>
+</div>
 
 <!-- Search -->
 <div class="search-bar">
   <div class="search-wrap">
-    <span class="ico">&#x1F50D;</span>
-    <input type="text" id="searchInput" placeholder="search the linternet..." oninput="doFilter()">
+    <span class="ico">🔍</span>
+    <input type="text" id="searchInput" placeholder="Search the linternet..." oninput="doFilter()">
   </div>
-</div>
-
-<!-- Category chips -->
-<div class="cat-bar" id="catBar"></div>
-
-<!-- Options -->
-<div class="options-bar">
-  <label class="toggle-label">
-    <input type="checkbox" id="showNoDesc" onchange="doFilter()">
-    <span>Show no-description lints</span>
-  </label>
 </div>
 
 <!-- Status -->
-<div id="statusBar" class="status-bar">
-  <div class="loading">
-    <div class="loading-text">SCANNING LINTERNET</div>
-    <div class="loading-bar"></div>
-  </div>
+<div id="statusBar" class="status-bar">Loading...</div>
+
+<!-- Layout: sidebar + main -->
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-section">
+      <div class="side-label">Categories</div>
+      <div id="sideCategories"></div>
+    </div>
+    <div class="side-section">
+      <div class="side-label">Options</div>
+      <label class="toggle-label">
+        <input type="checkbox" id="showNoDesc" onchange="doFilter()">
+        <span>Show no-description lints</span>
+      </label>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="content" id="content"></div>
+    <div class="footer">
+      LinternetPlaza &copy; 2025 &middot; <span id="siteTotal">0</span> lints discovered
+    </div>
+  </main>
 </div>
 
-<!-- Content -->
-<div class="content" id="content"></div>
-
-<!-- Footer -->
-<div class="footer">
-  LINTERNET PLAZA &middot; <span id="siteTotal">0</span> LINTS DISCOVERED &middot; POWERED BY POCKETWEB &middot; ON MINIMA
-</div>
-
-<!-- Toast -->
-<div class="toast" id="toast"></div>
+<!-- Mobile sidebar toggle -->
+<button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
 
 <!-- Scroll-top -->
-<button class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+<button class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
 
 <script>
 
@@ -80,16 +78,19 @@ var ALL_SITES = [];
 var FILTERED  = [];
 var RENDERED  = 0;
 var BATCH     = 40;
-var ALL_CATEGORIES = [];
+var ALL_CATEGORIES = [];  // sorted unique hashtags
 var activeCategory = 'all';
 
+// Cache: name -> preview srcdoc HTML (so we don't re-extract on filter)
 var PREVIEW_CACHE = {};
+
+// PocketWeb dapplink — resolved once, reused
 var POCKETWEB_DAPPLINK = null;
 
 var COLORS = [
-  '#00ff88','#ff3366','#00ccff','#ffcc00','#a855f7',
-  '#ff7b54','#14b8a6','#ec4899','#6e8ef7','#84cc16',
-  '#f97316','#06b6d4','#d946ef','#ef4444','#8b5cf6'
+  '#f0c040','#34d399','#5b8def','#fb923c','#a78bfa',
+  '#f472b6','#22d3ee','#f87171','#fbbf24','#818cf8',
+  '#4ade80','#c084fc','#67e8f9','#fda4af','#bef264'
 ];
 
 /* ══════════════════════════════════════
@@ -112,8 +113,7 @@ function esc(s) {
   return DOMPurify.sanitize(s);
 }
 
-function copyAddr(el, ev) {
-  if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+function copyAddr(el) {
   var text = el.textContent;
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text);
@@ -126,7 +126,6 @@ function copyAddr(el, ev) {
     document.execCommand('copy');
   }
   el.classList.add('copied');
-  showToast('Copied: ' + text);
   setTimeout(function() { el.classList.remove('copied'); }, 1500);
 }
 
@@ -143,35 +142,36 @@ function escRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Extract #hashtags from a description string
 function extractHashtags(desc) {
   if (!desc) return [];
   var matches = desc.match(/#[a-zA-Z0-9_]+/g);
   if (!matches) return [];
+  // Normalise to lowercase, deduplicate
   var seen = {};
   var result = [];
   for (var i = 0; i < matches.length; i++) {
     var tag = matches[i].toLowerCase();
-    if (!seen[tag]) { seen[tag] = true; result.push(tag); }
+    if (!seen[tag]) {
+      seen[tag] = true;
+      result.push(tag);
+    }
   }
   return result;
 }
 
-function showToast(msg) {
-  var t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast show';
-  setTimeout(function() { t.className = 'toast'; }, 2500);
-}
-
 /* ══════════════════════════════════════
    LOAD ALL LINTS
+   Strategy: ask pocketFS first (has full DB
+   including Maxima-received sites), fall back
+   to direct coin scan if pocketFS unavailable
    ══════════════════════════════════════ */
 function scanChain() {
-  document.getElementById('statusBar').innerHTML =
-    '<div class="loading"><div class="loading-text">SCANNING LINTERNET</div><div class="loading-bar"></div></div>';
+  document.getElementById('statusBar').textContent = 'Discovering lints...';
   document.getElementById('content').innerHTML = '';
   RENDERED = 0;
 
+  // Try pocketFS API first — it has the most complete list
   var api = {};
   api.action = "LISTALL";
 
@@ -191,11 +191,13 @@ function scanChain() {
       }
     }
 
+    // Fallback: direct coin scan
     MDS.log("LINTLIST: pocketFS unavailable, falling back to coin scan");
     scanCoins();
   });
 }
 
+// Process results from pocketFS (already structured as filepackets)
 function processSiteList(results) {
   var sites = {};
   for (var i = 0; i < results.length; i++) {
@@ -210,16 +212,22 @@ function processSiteList(results) {
 
     if (!sites[name] || sites[name].data.version < version) {
       sites[name] = {
-        data: { name: name, description: desc, version: version, file: file, tags: tags }
+        data: {
+          name: name,
+          description: desc,
+          version: version,
+          file: file,
+          tags: tags
+        }
       };
     }
   }
   finaliseSites(sites);
 }
 
+// Fallback: scan blockchain coins directly
 function scanCoins() {
-  document.getElementById('statusBar').innerHTML =
-    '<div class="loading"><div class="loading-text">SCANNING BLOCKCHAIN</div><div class="loading-bar"></div></div>';
+  document.getElementById('statusBar').textContent = 'Scanning blockchain...';
 
   MDS.cmd("coins simplestate:true address:" + MINIWEB_FILE_ADDRESS, function(resp) {
     if (!resp.response || resp.response.length === 0) {
@@ -250,7 +258,13 @@ function scanCoins() {
 
       if (!sites[name] || sites[name].data.version < version) {
         sites[name] = {
-          data: { name: name, description: desc, version: version, file: file, tags: tags }
+          data: {
+            name: name,
+            description: desc,
+            version: version,
+            file: file,
+            tags: tags
+          }
         };
       }
     }
@@ -258,6 +272,7 @@ function scanCoins() {
   });
 }
 
+// Common: sort, build categories, render
 function finaliseSites(sites) {
   ALL_SITES = Object.values(sites);
   ALL_SITES.sort(function(a, b) {
@@ -289,6 +304,7 @@ function finaliseSites(sites) {
    CATEGORY CHIPS
    ══════════════════════════════════════ */
 function renderCategoryChips() {
+  // Count lints per category
   var counts = { all: ALL_SITES.length, uncategorised: 0 };
   for (var i = 0; i < ALL_SITES.length; i++) {
     var tags = ALL_SITES[i].data.tags || [];
@@ -298,37 +314,43 @@ function renderCategoryChips() {
     }
   }
 
-  var h = '<button class="cat-chip active" onclick="setCategory(\'all\',this)">' +
-    '<span class="chip-dot" style="background:var(--neon-green)"></span>ALL' +
-    '<span class="chip-count">' + counts.all + '</span></button>';
+  var h = '<button class="side-btn active" onclick="setCategory(\'all\',this)">' +
+    '<span class="side-dot" style="background:var(--accent)"></span>All' +
+    '<span class="side-cnt">' + counts.all + '</span></button>';
 
   for (var i = 0; i < ALL_CATEGORIES.length; i++) {
     var tag = ALL_CATEGORIES[i];
     var c = COLORS[i % COLORS.length];
-    h += '<button class="cat-chip" onclick="setCategory(\'' + tag.replace(/'/g, "\\'") + '\',this)">' +
-      '<span class="chip-dot" style="background:' + c + '"></span>' + esc(tag).toUpperCase() +
-      '<span class="chip-count">' + (counts[tag] || 0) + '</span></button>';
+    h += '<button class="side-btn" onclick="setCategory(\'' + tag.replace(/'/g, "\\'") + '\',this)">' +
+      '<span class="side-dot" style="background:' + c + '"></span>' + esc(tag) +
+      '<span class="side-cnt">' + (counts[tag] || 0) + '</span></button>';
   }
 
   if (counts.uncategorised > 0) {
-    h += '<button class="cat-chip" onclick="setCategory(\'uncategorised\',this)">' +
-      '<span class="chip-dot" style="background:var(--text-dim)"></span>UNCATEGORISED' +
-      '<span class="chip-count">' + counts.uncategorised + '</span></button>';
+    h += '<button class="side-btn" onclick="setCategory(\'uncategorised\',this)">' +
+      '<span class="side-dot" style="background:var(--dim)"></span>uncategorised' +
+      '<span class="side-cnt">' + counts.uncategorised + '</span></button>';
   }
 
-  document.getElementById('catBar').innerHTML = h;
+  document.getElementById('sideCategories').innerHTML = h;
 }
 
 function setCategory(cat, btn) {
   activeCategory = cat;
-  var btns = document.querySelectorAll('.cat-chip');
+  var btns = document.querySelectorAll('.side-btn');
   for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
   if (btn) btn.classList.add('active');
   doFilter();
+  // Close sidebar on mobile
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
 }
 
 /* ══════════════════════════════════════
-   FILTER
+   FILTER — search + category + description toggle
    ══════════════════════════════════════ */
 function doFilter() {
   var q = (document.getElementById('searchInput').value || '').trim().toLowerCase();
@@ -336,6 +358,7 @@ function doFilter() {
 
   var items = ALL_SITES;
 
+  // Filter by category
   if (activeCategory === 'uncategorised') {
     items = items.filter(function(site) {
       return !site.data.tags || site.data.tags.length === 0;
@@ -346,6 +369,7 @@ function doFilter() {
     });
   }
 
+  // Filter out lints with no description (unless toggle is on)
   if (!showNoDesc) {
     items = items.filter(function(site) {
       var d = (site.data.description || '').trim();
@@ -353,6 +377,7 @@ function doFilter() {
     });
   }
 
+  // Search filter
   if (q) {
     items = items.filter(function(site) {
       var name = (site.data.name || '').toLowerCase();
@@ -369,19 +394,20 @@ function doFilter() {
 
   if (FILTERED.length === 0 && ALL_SITES.length > 0) {
     document.getElementById('content').innerHTML =
-      '<div class="empty"><h3>NO MATCHES</h3><p>Try a different search or category.</p></div>';
+      '<div class="empty"><h3>No matches</h3><p>Try a different search or category.</p></div>';
   } else if (FILTERED.length > 0) {
     renderByCategory();
   }
 }
 
 /* ══════════════════════════════════════
-   RENDER BY CATEGORY
+   RENDER BY CATEGORY — group tiles under headers
    ══════════════════════════════════════ */
 function renderByCategory() {
   var container = document.getElementById('content');
   container.innerHTML = '';
 
+  // Group filtered items by category
   var groups = {};
   var order = [];
 
@@ -392,27 +418,34 @@ function renderByCategory() {
 
     for (var j = 0; j < cats.length; j++) {
       var cat = cats[j];
-      if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+      if (!groups[cat]) {
+        groups[cat] = [];
+        order.push(cat);
+      }
       groups[cat].push(site);
     }
   }
 
+  // Sort: alphabetical, with 'uncategorised' last
   order.sort(function(a, b) {
     if (a === 'uncategorised') return 1;
     if (b === 'uncategorised') return -1;
     return a.localeCompare(b);
   });
 
+  // Render each group
   var globalIndex = 0;
   for (var g = 0; g < order.length; g++) {
     var cat = order[g];
     var sites = groups[cat];
 
+    // Category header
     var header = document.createElement('div');
     header.className = 'cat-header';
-    header.innerHTML = '<span class="cat-tag">' + esc(cat).toUpperCase() + '</span><span class="cat-count">' + sites.length + ' lints</span>';
+    header.innerHTML = '<span class="cat-tag">' + esc(cat) + '</span><span class="cat-count">' + sites.length + '</span>';
     container.appendChild(header);
 
+    // Grid of tiles
     var grid = document.createElement('div');
     grid.className = 'grid';
     for (var s = 0; s < sites.length; s++) {
@@ -434,11 +467,10 @@ function updateStatus() {
     bar.innerHTML = '<b>' + ALL_SITES.length + '</b> lints on the linternet';
   }
   document.getElementById('siteTotal').textContent = ALL_SITES.length;
-  document.getElementById('statsText').textContent = ALL_SITES.length + ' lints';
 }
 
 /* ══════════════════════════════════════
-   RENDER TILES (DAPP-STYLE CARDS)
+   RENDER TILES
    ══════════════════════════════════════ */
 function renderBatch() {
   var container = document.getElementById('content');
@@ -459,53 +491,47 @@ function renderBatch() {
 
 function createTile(site, index) {
   var name    = site.data.name || 'Unknown';
-  var desc    = site.data.description || '';
+  var desc    = site.data.description || 'No description';
   var version = site.data.version || 1;
   var fileHex = site.data.file || '';
   var color   = COLORS[index % COLORS.length];
 
-  // First letter from name
-  var letter = name.replace(/^Mx200[A-Z0-9]*/, '').charAt(0).toUpperCase() || name.charAt(0).toUpperCase() || 'L';
-
-  // Display name: truncate long addresses
-  var displayName = name;
-  if (name.length > 30 && name.startsWith('Mx')) {
-    displayName = name.substring(0, 12) + '...' + name.substring(name.length - 8);
+  // First letter from description, fallback to name
+  var letter = 'L';
+  if (desc && desc !== 'No description' && desc.length > 0) {
+    letter = desc.replace(/[^a-zA-Z]/g, '').charAt(0).toUpperCase() || 'L';
+  } else {
+    var stripped = name.replace(/^Mx200[A-Z0-9]*/, '');
+    letter = stripped.charAt(0).toUpperCase() || name.charAt(0).toUpperCase() || 'L';
   }
 
+  // No truncation — show full address
+
+  // Use a stable ID based on name, not index (survives filtering)
   var previewId = 'pv-' + name.replace(/[^a-zA-Z0-9]/g, '_');
 
   var tile = document.createElement('div');
   tile.className = 'bm';
-  tile.style.animationDelay = ((index - (RENDERED || 0)) * 0.06) + 's';
-
-  var descDisplay = desc || 'No description';
+  tile.style.setProperty('--tile-color', color);
+  tile.style.animationDelay = ((index - (RENDERED || 0)) * 0.03) + 's';
 
   tile.innerHTML =
-    '<div class="bm-top">' +
-    '  <div class="bm-icon-wrap">' +
-    '    <span class="bm-icon-letter" style="color:' + color + '">' + esc(letter) + '</span>' +
-    '  </div>' +
-    '  <div class="bm-meta">' +
-    '    <div class="bm-name">' + esc(displayName) + '</div>' +
-    '    <div class="bm-version">v' + version + '</div>' +
-    '  </div>' +
-    '</div>' +
+    '<div class="bm-bar" style="background:' + color + '"></div>' +
     '<div class="bm-preview" id="' + previewId + '">' +
     '  <div class="bm-preview-placeholder" style="background:' + color + '">' + esc(letter) + '</div>' +
     '</div>' +
     '<div class="bm-body">' +
-    '  <div class="bm-desc">' + esc(descDisplay) + '</div>' +
-    '  <button class="bm-btn" onclick="event.stopPropagation();openInPocketWeb(\'' + name.replace(/'/g, "\\'") + '\')">OPEN</button>' +
-    '  <div class="bm-path" onclick="copyAddr(this,event)" title="Click to copy address">' + esc(name) + '</div>' +
+    '  <div class="bm-tag" style="color:' + color + '">v' + version + '</div>' +
+    '  <p class="bm-desc">' + esc(desc) + '</p>' +
+    '  <div class="bm-path" onclick="event.stopPropagation();copyAddr(this)" title="Click to copy">' + esc(name) + '</div>' +
     '</div>';
 
-  // Click card → open
+  // Click → open in PocketWeb
   tile.addEventListener('click', function() {
     openInPocketWeb(name);
   });
 
-  // Preview
+  // Generate preview (uses cache, no flicker)
   if (fileHex) {
     attachPreview(previewId, name, fileHex, color, letter);
   }
@@ -514,9 +540,11 @@ function createTile(site, index) {
 }
 
 /* ══════════════════════════════════════
-   PREVIEW
+   PREVIEW — extract once, cache, no flicker
    ══════════════════════════════════════ */
 function attachPreview(elementId, name, hexData, color, letter) {
+
+  // Already cached? Apply immediately
   if (PREVIEW_CACHE[name]) {
     setTimeout(function() {
       applyPreviewToElement(elementId, PREVIEW_CACHE[name]);
@@ -524,6 +552,7 @@ function attachPreview(elementId, name, hexData, color, letter) {
     return;
   }
 
+  // Extract from ZIP
   try {
     var bytes = hexToBytes(hexData);
     var blob = new Blob([bytes], { type: 'application/zip' });
@@ -564,15 +593,20 @@ function attachPreview(elementId, name, hexData, color, letter) {
             }
           }
 
+          // Strip all scripts
           html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
 
+          // Insert CSS after <head>
           if (html.indexOf('<head') !== -1) {
             html = html.replace(/<head([^>]*)>/i, '<head$1>' + cssBlock);
           } else {
             html = cssBlock + html;
           }
 
+          // Cache it
           PREVIEW_CACHE[name] = html;
+
+          // Apply to element if still in DOM
           applyPreviewToElement(elementId, html);
         });
       });
@@ -583,6 +617,8 @@ function attachPreview(elementId, name, hexData, color, letter) {
 function applyPreviewToElement(elementId, srcdocHtml) {
   var el = document.getElementById(elementId);
   if (!el) return;
+
+  // Already has an iframe? Don't touch it (prevents flicker)
   if (el.querySelector('iframe')) return;
 
   var iframe = document.createElement('iframe');
@@ -591,6 +627,7 @@ function applyPreviewToElement(elementId, srcdocHtml) {
   iframe.srcdoc = srcdocHtml;
   iframe.tabIndex = -1;
 
+  // Hide placeholder, show iframe — no removal, no flicker
   var placeholder = el.querySelector('.bm-preview-placeholder');
   if (placeholder) placeholder.style.display = 'none';
   el.appendChild(iframe);
@@ -615,7 +652,10 @@ function loadZipFile(zip, filename, relativeTo) {
 
 /* ══════════════════════════════════════
    OPEN LINT IN POCKETWEB
+   Finds pocketWeb by listing installed MiniDapps,
+   then opens browse.html with the mxsite address
    ══════════════════════════════════════ */
+// Pre-resolve on init so clicks are synchronous (avoids popup blocker)
 function resolvePocketWebLink() {
   MDS.dapplink("PocketWeb", function(res) {
     if (res.status && res.uid && res.sessionid) {
@@ -628,14 +668,16 @@ function resolvePocketWebLink() {
 function openInPocketWeb(mxsite) {
   var url = buildPocketWebURL(mxsite);
   if (url) {
+    // Resolved — open in new tab (synchronous, won't be blocked)
     window.open(url, '_blank');
   } else {
+    // Not yet resolved — try now, navigate in same tab as fallback
     MDS.dapplink("PocketWeb", function(res) {
       if (res.status && res.uid && res.sessionid) {
         POCKETWEB_DAPPLINK = res;
         window.location.href = buildPocketWebURL(mxsite);
       } else {
-        showToast('PocketWeb not found — is it installed?');
+        MDS.notify("PocketWeb not found — is it installed?");
       }
     });
   }
@@ -652,7 +694,7 @@ function buildPocketWebURL(mxsite) {
 function showEmpty() {
   document.getElementById('content').innerHTML =
     '<div class="empty">' +
-    '<h3>NO LINTS FOUND</h3>' +
+    '<h3>No lints found yet</h3>' +
     '<p>The blockchain is still syncing, or no sites have been published yet.</p>' +
     '</div>';
 }
